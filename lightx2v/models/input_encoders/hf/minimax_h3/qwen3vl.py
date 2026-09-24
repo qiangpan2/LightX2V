@@ -762,6 +762,14 @@ class MiniMaxH3Qwen3VLTextEncoder:
         return attn_type
 
     @staticmethod
+    def _resolve_vision_attn_type(config):
+        requested = config.get("qwen3vl_vision_attn_type", "torch_sdpa")
+        if requested not in ATTN_WEIGHT_REGISTER:
+            available = ", ".join(sorted(ATTN_WEIGHT_REGISTER.keys()))
+            raise ValueError(f"Unknown qwen3vl_vision_attn_type={requested!r}; available LightX2V attention operators: {available}")
+        return requested
+
+    @staticmethod
     def _expected_weight_shapes(text_config):
         hidden_size = int(text_config["hidden_size"])
         intermediate_size = int(text_config["intermediate_size"])
@@ -1031,6 +1039,7 @@ class MiniMaxH3Qwen3VLTextEncoder:
         text_encoder_path = self._component_path("text_encoder_path", "text_encoder")
         model_config = self._read_model_config(text_encoder_path)
         vision_config = dict(model_config["vision_config"])
+        vision_config["attn_type"] = self._resolve_vision_attn_type(self.config)
         logger.info(
             "Building native MiniMax-H3 Qwen3-VL vision tower from {} for image input task.",
             text_encoder_path,

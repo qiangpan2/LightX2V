@@ -11,6 +11,8 @@ import torch.nn.functional as F
 from loguru import logger
 from safetensors import safe_open
 
+from lightx2v.utils.registry_factory import ATTN_WEIGHT_REGISTER
+
 
 def _vision_position_ids(grid_thw, merge_size):
     positions = []
@@ -87,6 +89,8 @@ class _VisionAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.qkv = nn.Linear(config["hidden_size"], config["hidden_size"] * 3, bias=True)
         self.proj = nn.Linear(config["hidden_size"], config["hidden_size"], bias=True)
+        attn_type = config.get("attn_type", "torch_sdpa")
+        self.calculate = None if attn_type == "torch_sdpa" else ATTN_WEIGHT_REGISTER[attn_type]()
 
     def forward(self, hidden_states, cu_seqlens, cos, sin):
         length = hidden_states.shape[0]
@@ -95,6 +99,19 @@ class _VisionAttention(nn.Module):
         cos_f, sin_f = cos.unsqueeze(-2).float(), sin.unsqueeze(-2).float()
         query = (query_f * cos_f + _rotate_half(query_f) * sin_f).to(query.dtype)
         key = (key_f * cos_f + _rotate_half(key_f) * sin_f).to(key.dtype)
+        if self.calculate is not None:
+            max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max().item())
+            out = self.calculate.apply(
+                query,
+                key,
+                value,
+                cu_seqlens_q=cu_seqlens,
+                cu_seqlens_kv=cu_seqlens,
+                max_seqlen_q=max_seqlen,
+                max_seqlen_kv=max_seqlen,
+                causal=False,
+            )
+            return self.proj(out)
         outputs = []
         for start, end in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist()):
             q = query[start:end].transpose(0, 1).unsqueeze(0)
