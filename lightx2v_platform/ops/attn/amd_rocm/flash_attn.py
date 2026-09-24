@@ -107,3 +107,80 @@ class AiterAttnWeight(AttnWeightTemplate):
             max_seqlen_kv,
         ).reshape(bs * max_seqlen_q, -1)
         return x
+
+
+aiter_fp8_dtypes = None
+aiter_per_tensor_quant = None
+aiter_flash_attn_fp8_pertensor_func = None
+aiter_flash_attn_varlen_fp8_pertensor_func = None
+AITER_FP8BF16_AVAILABLE = False
+AITER_FP8BF16_IMPORT_ERROR = None
+
+try:
+    from aiter import dtypes as aiter_fp8_dtypes
+    from aiter import per_tensor_quant as aiter_per_tensor_quant
+    from aiter.ops.mha import flash_attn_fp8_pertensor_func as aiter_flash_attn_fp8_pertensor_func
+    from aiter.ops.mha import flash_attn_varlen_fp8_pertensor_func as aiter_flash_attn_varlen_fp8_pertensor_func
+
+    AITER_FP8BF16_AVAILABLE = True
+    logger.info("aiter fp8bf16 pertensor kernels found")
+except ImportError as e:
+    AITER_FP8BF16_IMPORT_ERROR = str(e)
+    if IS_AMD_ROCM:
+        logger.warning(f"aiter fp8bf16 kernels not importable: {e}")
+
+
+@PLATFORM_ATTN_WEIGHT_REGISTER("aiter_fp8bf16_attn")
+class AiterFp8Bf16AttnWeight(AttnWeightTemplate):
+    """aiter CK fp8 in / bf16 out. 3D THD uses varlen; 4D uses BSHD.
+
+    Differs from aiter_attn: forwards causal, does not flatten 4D, returns
+    out.shape[0] (packed-safe), synthesizes cu_seqlens=[0, S] when None.
+    """
+
+    def __init__(self):
+        self.config = {}
+        if not IS_AMD_ROCM:
+            raise RuntimeError("aiter_fp8bf16_attn is only available on AMD ROCm platform.\nCurrent platform is not AMD ROCm (torch.version.hip is not set).")
+        if not AITER_FP8BF16_AVAILABLE:
+            raise ImportError(f"aiter_fp8bf16_attn requires aiter fp8bf16 kernels.\nImport error: {AITER_FP8BF16_IMPORT_ERROR}")
+
+    def apply(
+        self,
+        q,
+        k,
+        v,
+        cu_seqlens_q=None,
+        cu_seqlens_kv=None,
+        max_seqlen_q=None,
+        max_seqlen_kv=None,
+        causal=False,
+        **kwargs,
+    ):
+        # softmax_scale is ignored; the kernel uses 1/sqrt(D), which matches H3.
+        q_q, q_s = aiter_per_tensor_quant(q, quant_dtype=aiter_fp8_dtypes.fp8)
+        k_q, k_s = aiter_per_tensor_quant(k, quant_dtype=aiter_fp8_dtypes.fp8)
+        v_q, v_s = aiter_per_tensor_quant(v, quant_dtype=aiter_fp8_dtypes.fp8)
+        if q.ndim == 4:
+            out = aiter_flash_attn_fp8_pertensor_func(q_q, k_q, v_q, q_s, k_s, v_s, causal=causal)
+            return out.reshape(out.shape[0] * out.shape[1], -1)
+
+        def _cu(cu, seq, device):
+            if cu is None:
+                return torch.tensor((0, seq), dtype=torch.int32, device=device)
+            return cu.to(device, non_blocking=True) if cu.is_cpu else cu
+
+        out = aiter_flash_attn_varlen_fp8_pertensor_func(
+            q_q,
+            k_q,
+            v_q,
+            q_s,
+            k_s,
+            v_s,
+            _cu(cu_seqlens_q, q.shape[0], q.device),
+            _cu(cu_seqlens_kv, k.shape[0], k.device),
+            q.shape[0] if max_seqlen_q is None else max_seqlen_q,
+            k.shape[0] if max_seqlen_kv is None else max_seqlen_kv,
+            causal=causal,
+        )
+        return out.reshape(out.shape[0], -1)

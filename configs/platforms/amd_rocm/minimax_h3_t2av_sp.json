@@ -1,0 +1,13 @@
+{
+  "attn_type": "aiter_fp8bf16_attn",
+  "refiner_attn_type": "aiter_fp8bf16_attn",
+  "qwen3vl_attn_type": "aiter_fp8bf16_attn",
+  "qwen3vl_vision_attn_type": "aiter_fp8bf16_attn",
+  "rms_type": "torch_native",
+  "rope_type": "torch_real_rope",
+  "seq_parallel": true,
+  "parallel": {
+    "seq_p_size": 2,
+    "seq_p_attn_type": "ulysses"
+  }
+}
