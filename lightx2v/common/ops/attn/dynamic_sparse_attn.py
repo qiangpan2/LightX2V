@@ -111,6 +111,9 @@ class DynamicSparseAttnWeight(AttnWeightTemplate):
             else:
                 self.BLKQ, self.BLKK = 128, 64
             self.apply_func = self.apply_sage2
+        elif self.operator == "sage2_aiter":
+            self.BLKQ, self.BLKK = 64, 64
+            self.apply_func = self.apply_sage2_aiter
         elif self.operator == "sage3":
             from .utils.sparge_util import block_map_ordinal_lut_triton
 
@@ -223,6 +226,27 @@ class DynamicSparseAttnWeight(AttnWeightTemplate):
         out = dynamic_sparse_sage2(q, k, v, self.topk, self.BLKQ, self.BLKK, self.arch)
         out = out.transpose(1, 2).reshape(max_seqlen_q, -1)
         return out
+
+    def apply_sage2_aiter(
+        self,
+        q,
+        k,
+        v,
+        cu_seqlens_q=None,
+        cu_seqlens_kv=None,
+        max_seqlen_q=None,
+        max_seqlen_kv=None,
+        **kwargs,
+    ):
+        # (L, H, D) -> (B, H, L, D). aiter mask blocks are 64, matching BLKQ/BLKK above.
+        from aiter.ops.flydsl import block_sparse_sageattn2
+
+        q = q.unsqueeze(0).transpose(1, 2).contiguous()
+        k = k.unsqueeze(0).transpose(1, 2).contiguous()
+        v = v.unsqueeze(0).transpose(1, 2).contiguous()
+        sparse_map, _, _ = self._get_block_map(q, k, topk_ratio=self.topk, BLKQ=self.BLKQ, BLKK=self.BLKK)
+        out = block_sparse_sageattn2(q, k, v, sparse_map, tensor_layout="HND")
+        return out.transpose(1, 2).reshape(max_seqlen_q, -1)
 
     def apply_sage3(
         self,
