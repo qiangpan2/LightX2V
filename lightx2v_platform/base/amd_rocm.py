@@ -7,7 +7,15 @@ This module handles AMD-specific optimizations including:
 - sgl_kernel compatibility layer using aiter library (optional; only for the aiter-backed GEMM/RMSNorm path)
 """
 
+import os
 import sys
+
+# Triton must be imported before torch. After torch is loaded, importing triton
+# segfaults, and aiter's logger then dies inside torch._dynamo. This module is
+# imported before any other LightX2V torch import when the process starts with
+# PLATFORM=amd_rocm already set.
+if os.environ.get("PLATFORM") == "amd_rocm":
+    import triton  # noqa: F401
 
 import torch
 import torch.distributed as dist
