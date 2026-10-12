@@ -26,6 +26,43 @@ _MAX_STAGES = int(os.getenv("LIGHTX2V_ROCM_TRITON_MAX_STAGES", "2"))
 _VALIDATED_ARCHS = ("gfx1201", "gfx1100")
 
 
+@PLATFORM_ATTN_WEIGHT_REGISTER("sage_attn2_aiter")
+class AiterSageAttn2Weight(AttnWeightTemplate):
+    """Dense gfx120 SageAttention2: ``aiter.ops.flydsl.sageattn2``."""
+
+    def __init__(self):
+        self.config = {}
+        if getattr(torch.version, "hip", None) is None:
+            raise RuntimeError("sage_attn2_aiter requires AMD ROCm (torch.version.hip is not set).")
+        from aiter.ops.flydsl import sageattn2
+
+        self.sageattn = sageattn2
+
+    def apply(
+        self,
+        q,
+        k,
+        v,
+        cu_seqlens_q=None,
+        cu_seqlens_kv=None,
+        max_seqlen_q=None,
+        max_seqlen_kv=None,
+        **kwargs,
+    ):
+        q, k, v = self._prepare_qkv(q, k, v)
+        output = self.sageattn(q, k, v, tensor_layout="NHD")
+        return output.reshape(q.shape[0] * q.shape[1], -1)
+
+    @staticmethod
+    def _prepare_qkv(q, k, v):
+        q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
+        if q.ndim == 3:
+            return q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0)
+        if q.ndim != 4:
+            raise ValueError(f"aiter SageAttention2 expects 3D or 4D Q/K/V, got q.ndim={q.ndim}.")
+        return q, k, v
+
+
 @PLATFORM_ATTN_WEIGHT_REGISTER("sage_attn2_amd_rocm")
 class AmdSageAttn2Weight(AttnWeightTemplate):
     """Dense SageAttention2 with opt-in ROCm compiler workarounds."""
