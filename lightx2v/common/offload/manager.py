@@ -64,14 +64,18 @@ class WeightAsyncStreamManager(object):
         logger.info(f"contiguous block offload: {len(group.blocks)} CPU buffers, {group.blocks[0].block_buffer.layout.nbytes} bytes/block, two device slots")
         self.need_init_first_buffer = True
 
+    def _device_wide_sync(self):
+        # XPU and ROCm do not publish non_blocking copies to another stream
+        # after a per-stream synchronize. ROCm reports its device as "cuda".
+        return AI_DEVICE == "xpu" or PLATFORM == "amd_rocm"
+
     def _sync(self):
         """Synchronize to ensure memory visibility across streams.
 
-        XPU streams do not guarantee cross-stream memory visibility after a
-        per-stream synchronize, so we use a device-wide sync on XPU.
-        On CUDA, per-stream synchronize is sufficient and preferred.
+        XPU and ROCm need a device-wide sync. On CUDA, per-stream synchronize
+        is sufficient and preferred.
         """
-        if AI_DEVICE == "xpu":
+        if self._device_wide_sync():
             torch_device_module.synchronize()
         else:
             self.init_stream.synchronize()
@@ -114,7 +118,7 @@ class WeightAsyncStreamManager(object):
                 self.cuda_buffers[phase_idx].load_state_dict(blocks[block_idx].compute_phases[phase_idx].state_dict(), block_idx, adapter_block_idx)
 
     def swap_blocks(self):
-        if AI_DEVICE == "xpu":
+        if self._device_wide_sync():
             torch_device_module.synchronize()
         else:
             self.cuda_load_stream.synchronize()
@@ -125,7 +129,7 @@ class WeightAsyncStreamManager(object):
         )
 
     def swap_phases(self):
-        if AI_DEVICE == "xpu":
+        if self._device_wide_sync():
             torch_device_module.synchronize()
         else:
             self.cuda_load_stream.synchronize()

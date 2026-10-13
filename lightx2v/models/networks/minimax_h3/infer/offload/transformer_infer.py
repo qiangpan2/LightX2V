@@ -2,7 +2,7 @@ import torch
 
 from lightx2v.common.offload.manager import WeightAsyncStreamManager
 from lightx2v.models.networks.minimax_h3.infer.transformer_infer import MiniMaxH3TransformerInfer
-from lightx2v_platform.base.global_var import AI_DEVICE
+from lightx2v_platform.base.global_var import AI_DEVICE, PLATFORM
 
 torch_device_module = getattr(torch, AI_DEVICE)
 
@@ -39,10 +39,10 @@ class MiniMaxH3OffloadTransformerInfer(MiniMaxH3TransformerInfer):
             self.offload_manager.prefetch_weights(next_block_index, blocks)
             block = self.offload_manager.cuda_buffers[0]
             self.block_idx = block_index
-            if AI_DEVICE == "xpu":
-                # Match Wan's XPU offload path: overlap the next weight copy on
-                # the load stream with current-block compute on the default
-                # stream, then let swap_blocks() perform the device-wide sync.
+            if AI_DEVICE == "xpu" or PLATFORM == "amd_rocm":
+                # XPU and ROCm do not keep a side compute stream coherent with
+                # the load stream. Run the block on the default stream; the
+                # manager's device-wide sync publishes the prefetched weights.
                 hidden_states = self.run_block(block_index, block, hidden_states, pre_infer_out)
             else:
                 with torch_device_module.stream(self.offload_manager.compute_stream):
