@@ -71,8 +71,8 @@ dependencies = [
     "decord",
     "av>=17",
     "torchada>=0.1.10",
-    "flydsl @ file:///workspace/flydsl-0.3.5-cp313-cp313-linux_x86_64.whl",
-    "amd-aiter @ file:///workspace/amd_aiter-0.1.25.dev169+g922e4a7a2.d20261012-cp313-cp313-linux_x86_64.whl",
+    "flydsl @ file:///workspace/sage12/flydsl-0.3.5-cp313-cp313-linux_x86_64.whl",
+    "amd-aiter @ file:///workspace/sage12/amd_aiter-0.1.25.dev169+g922e4a7a2.d20261014-cp313-cp313-linux_x86_64.whl",
 ]
 
 [project.urls]

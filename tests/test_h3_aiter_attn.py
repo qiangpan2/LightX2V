@@ -45,7 +45,7 @@ def test_dense_dit_and_vae_layouts():
     assert vae_out.shape == (6, 8)
 
 
-def test_sla_sage2_aiter_passes_64_block_mask(monkeypatch):
+def test_sla_sage2_aiter_passes_sageattn1_block_mask(monkeypatch):
     triton = types.ModuleType("triton")
 
     def jit(*args, **kwargs):
@@ -71,7 +71,7 @@ def test_sla_sage2_aiter_passes_64_block_mask(monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     weight = DynamicSparseAttnWeight({"operator": "sage2_aiter", "sparsity_ratio": 0.85})
-    assert (weight.BLKQ, weight.BLKK) == (64, 64)
+    assert (weight.BLKQ, weight.BLKK) == (128, 32)
     assert abs(weight.topk - 0.15) < 1e-12
 
     captured = {}
@@ -89,7 +89,7 @@ def test_sla_sage2_aiter_passes_64_block_mask(monkeypatch):
 
     weight._get_block_map = fake_block_map
     flydsl = types.ModuleType("aiter.ops.flydsl")
-    flydsl.block_sparse_sageattn2 = fake_sparse
+    flydsl.block_sparse_sageattn1 = fake_sparse
     sys.modules["aiter"] = types.ModuleType("aiter")
     sys.modules["aiter.ops"] = types.ModuleType("aiter.ops")
     sys.modules["aiter.ops.flydsl"] = flydsl
@@ -97,5 +97,5 @@ def test_sla_sage2_aiter_passes_64_block_mask(monkeypatch):
     tokens, heads, dim = 80, 2, 64
     q = torch.randn(tokens, heads, dim)
     out = weight.apply(q, q, q)
-    assert captured == {"q": (1, heads, tokens, dim), "mask": (1, heads, 2, 2), "layout": "HND"}
+    assert captured == {"q": (1, heads, tokens, dim), "mask": (1, heads, 1, 3), "layout": "HND"}
     assert out.shape == (tokens, heads * dim)
