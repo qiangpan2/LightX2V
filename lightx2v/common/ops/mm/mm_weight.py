@@ -18,7 +18,7 @@ from lightx2v.common.ops.mm.fp8_f16_accum import (
     fp8_f16_accum_mm_available,
     validate_fp8_f16_accum_qmax,
 )
-from lightx2v.common.ops.mm.sgl_kernel import sgl_fp8_scaled_mm, sgl_fp8_scaled_mm_meta
+from lightx2v.common.ops.mm.sgl_kernel import aiter_fp8_w8a8, fp8_sgl_uses_aiter, sgl_fp8_scaled_mm, sgl_fp8_scaled_mm_meta
 from lightx2v.common.ops.utils import *
 from lightx2v.utils.envs import *
 from lightx2v.utils.ggml_tensor import GGMLTensor
@@ -2014,14 +2014,25 @@ class MMWeightWfp8channelAfp8channeldynamicSgl(MMWeightQuantTemplate):
             lora_prefix,
             lora_path,
         )
-        self.weight_need_transpose = True
+        self.use_aiter_w8a8 = fp8_sgl_uses_aiter()
+        self.weight_need_transpose = not self.use_aiter_w8a8
         self.scale_force_fp32 = True
         self.load_func = self.load_fp8_perchannel_sym
         self.act_quant_func = self.act_quant_fp8_perchannel_sym_sgl
 
     def apply(self, input_tensor):
         input_tensor_quant, input_tensor_scale = self.act_quant_func(input_tensor)
-        if magi_register_custom_op is not None and sgl_kernel is not None:
+        if self.use_aiter_w8a8:
+            weight = self.weight.t() if self.weight_need_transpose else self.weight
+            output_tensor = aiter_fp8_w8a8(
+                input_tensor_quant,
+                weight,
+                input_tensor_scale,
+                self.weight_scale,
+                self.infer_dtype,
+                self._get_actual_bias(),
+            )
+        elif magi_register_custom_op is not None and sgl_kernel is not None:
             output_tensor = torch.ops.lightx2v.fp8_scaled_mm(
                 input_tensor_quant,
                 self.weight,
@@ -2049,6 +2060,8 @@ class MMWeightWfp8channelAfp8channelF16Accum(MMWeightWfp8channelAfp8channeldynam
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fp8_activation_qmax = None
+        # CUTLASS reads N from weight.shape[1], so this subclass stays [K, N].
+        self.weight_need_transpose = True
 
     def enable_fp8_f16_accum(self, activation_qmax):
         activation_qmax = validate_fp8_f16_accum_qmax(activation_qmax)

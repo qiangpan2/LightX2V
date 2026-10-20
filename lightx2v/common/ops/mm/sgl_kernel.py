@@ -35,3 +35,16 @@ def sgl_fp8_scaled_mm(
     if sgl_kernel is None:
         raise ImportError("sgl_kernel is required for SGL FP8 scaled matrix multiplication")
     return sgl_kernel.fp8_scaled_mm(mat_a, mat_b, scales_a, scales_b, out_dtype, bias=bias)
+
+
+def fp8_sgl_uses_aiter():
+    from lightx2v_platform.base.global_var import PLATFORM
+
+    return PLATFORM == "amd_rocm"
+
+
+def aiter_fp8_w8a8(x, weight, x_scale, w_scale, dtype, bias=None):
+    """Run fp8-sgl on ROCm. ``weight`` stays ``[N, K]``; ``gemm_a8w8`` transposes it."""
+    from aiter.ops.triton.gemm.basic.gemm_a8w8 import gemm_a8w8
+
+    return gemm_a8w8(x, weight, x_scale, w_scale, bias=bias, dtype=dtype)

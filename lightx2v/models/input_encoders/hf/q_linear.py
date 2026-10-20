@@ -36,7 +36,7 @@ from lightx2v.common.ops.mm.fp8_f16_accum import (
     fp8_f16_accum_mm_available,
     validate_fp8_f16_accum_qmax,
 )
-from lightx2v.common.ops.mm.sgl_kernel import sgl_fp8_scaled_mm
+from lightx2v.common.ops.mm.sgl_kernel import aiter_fp8_w8a8, fp8_sgl_uses_aiter, sgl_fp8_scaled_mm
 from lightx2v.common.ops.mm.triton_kernels import fp8_gemm_bias_triton, fp8_gemm_triton, fp8_quantize_triton, int8_gemm_bias_triton, int8_gemm_triton, int8_quantize_triton
 from lightx2v_platform.ops.mm.mthreads_musa.fp8_scaled_mm import fp8_linear as musa_fp8_linear
 
@@ -283,14 +283,24 @@ class SglQuantLinearFp8(nn.Module):
         input_tensor = input_tensor.squeeze(0)
         dtype = input_tensor.dtype
         input_tensor_quant, input_tensor_scale = self.act_quant_func(input_tensor)
-        output_tensor = sgl_fp8_scaled_mm(
-            input_tensor_quant,
-            self.weight.t(),
-            input_tensor_scale,
-            self.weight_scale.float(),
-            dtype,
-            bias=self.bias,
-        )
+        if fp8_sgl_uses_aiter():
+            output_tensor = aiter_fp8_w8a8(
+                input_tensor_quant,
+                self.weight,
+                input_tensor_scale,
+                self.weight_scale.float(),
+                dtype,
+                self.bias,
+            )
+        else:
+            output_tensor = sgl_fp8_scaled_mm(
+                input_tensor_quant,
+                self.weight.t(),
+                input_tensor_scale,
+                self.weight_scale.float(),
+                dtype,
+                bias=self.bias,
+            )
 
         return output_tensor.unsqueeze(0)
 
