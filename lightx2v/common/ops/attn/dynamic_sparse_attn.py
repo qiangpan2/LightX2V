@@ -111,7 +111,7 @@ class DynamicSparseAttnWeight(AttnWeightTemplate):
             else:
                 self.BLKQ, self.BLKK = 128, 64
             self.apply_func = self.apply_sage2
-        elif self.operator == "sage2_aiter":
+        elif self.operator in {"sage1_aiter", "sage2_aiter"}:
             # block_sparse_sageattn1 tiles are 128 query rows by 32 keys.
             self.BLKQ, self.BLKK = 128, 32
             self.apply_func = self.apply_sage2_aiter
